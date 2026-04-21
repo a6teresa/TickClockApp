@@ -112,7 +112,7 @@ fun TickClockScreen() {
         
         Text(
             text = timeFormatted,
-            fontSize = 18.sp,
+            fontSize = 36.sp, // Doubled from 18.sp
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 24.dp)
         )
@@ -120,21 +120,23 @@ fun TickClockScreen() {
 }
 
 private fun playToneForSecond(cycleSecond: Int) {
-    val shortFreq = 392.0 // G4
-    val longFreq = 440.0  // A4
+    val freq392 = 392.0 // G4
+    val freq440 = 440.0 // A4
+    val freq523 = 523.0 // C5
+    val freq659 = 659.0 // E5
     
     when (cycleSecond) {
-        // 1-13: Short tones
-        in 1..13 -> generateTone(shortFreq, 100)
-        // 14: Long tone spanning 2 seconds
-        14 -> generateTone(longFreq, 1800)
+        // 1-13: Short tones (392 Hz)
+        in 1..13 -> generateTone(freq392, 100)
+        // 14: Long tone spanning 2 seconds (440 Hz)
+        14 -> generateTone(freq440, 1800)
         15 -> { }
         // 16-25: Silent
         in 16..25 -> { }
-        // 26-28: 3 short
-        in 26..28 -> generateTone(shortFreq, 100)
-        // 29: Long tone spanning 2 seconds
-        29 -> generateTone(longFreq, 1800)
+        // 26-28: 3 short (523 Hz)
+        in 26..28 -> generateTone(freq523, 100)
+        // 29: Long tone spanning 2 seconds (659 Hz)
+        29 -> generateTone(freq659, 1800)
         30 -> { }
     }
 }
@@ -145,13 +147,27 @@ private fun generateTone(freqHz: Double, durationMs: Int) {
     val sample = DoubleArray(numSamples)
     val generatedSnd = ByteArray(2 * numSamples)
 
+    // Fade-in and Fade-out parameters (to prevent clicking)
+    val fadeDurationMs = 10
+    val fadeSamples = (fadeDurationMs * sampleRate / 1000)
+
     for (i in 0 until numSamples) {
-        sample[i] = sin(2.0 * PI * i.toDouble() / (sampleRate.toDouble() / freqHz))
+        var amplitude = 1.0
+        
+        // Apply Fade-in
+        if (i < fadeSamples) {
+            amplitude = i.toDouble() / fadeSamples
+        } 
+        // Apply Fade-out
+        else if (i > numSamples - fadeSamples) {
+            amplitude = (numSamples - i).toDouble() / fadeSamples
+        }
+
+        sample[i] = amplitude * sin(2.0 * PI * i.toDouble() / (sampleRate.toDouble() / freqHz))
     }
 
     var idx = 0
     for (dVal in sample) {
-        // Use full amplitude (32767) for maximum volume
         val valShort = (dVal * 32767).toInt().toShort()
         generatedSnd[idx++] = (valShort.toInt() and 0x00ff).toByte()
         generatedSnd[idx++] = ((valShort.toInt() and 0xff00) ushr 8).toByte()
@@ -160,7 +176,7 @@ private fun generateTone(freqHz: Double, durationMs: Int) {
     val audioTrack = AudioTrack.Builder()
         .setAudioAttributes(
             AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM) // Alarm usage often ignores 'do not disturb' and has higher volume limits
+                .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         )
@@ -179,7 +195,7 @@ private fun generateTone(freqHz: Double, durationMs: Int) {
     audioTrack.write(generatedSnd, 0, generatedSnd.size)
     audioTrack.play()
     
-    // Clean up to prevent memory issues
+    // Clean up
     Thread {
         Thread.sleep(durationMs.toLong() + 200)
         audioTrack.stop()
