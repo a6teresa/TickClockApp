@@ -1,8 +1,10 @@
 package com.example.tickclockapp
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.RingtoneManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,13 +16,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,7 +64,8 @@ fun TickClockScreen() {
     var isRunning by remember { mutableStateOf(false) }
     var totalSeconds by remember { mutableIntStateOf(0) }
     var cycleSeconds by remember { mutableIntStateOf(0) }
-    val activity = LocalContext.current as? ComponentActivity
+    val context = LocalContext.current
+    val activity = context as? ComponentActivity
 
     LaunchedEffect(isRunning) {
         if (isRunning) {
@@ -74,6 +80,11 @@ fun TickClockScreen() {
                 
                 // Cumulative timer
                 totalSeconds++
+                
+                // Notification at 3:45, 7:45, 11:45, etc. (totalSeconds % 240 == 225)
+                if (totalSeconds > 0 && (totalSeconds % 240 == 225)) {
+                    playNotificationSound(context)
+                }
                 
                 delay(1000)
             }
@@ -91,46 +102,58 @@ fun TickClockScreen() {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        val buttonHeight = 120.dp
         val lightGreen = Color(0xFF90EE90)
         
+        // Main Circle Button
+        val mainButtonSize = 240.dp
         OutlinedButton(
             onClick = { isRunning = !isRunning },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(buttonHeight),
-            border = BorderStroke(2.dp, lightGreen),
+            modifier = Modifier.size(mainButtonSize),
+            shape = CircleShape,
+            border = BorderStroke(3.dp, lightGreen),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = Color.Transparent,
                 contentColor = Color.White
             )
         ) {
-            Text(if (isRunning) "Pause" else "Start", fontSize = 32.sp)
+            Text(if (isRunning) "Pause" else "Start", fontSize = 40.sp)
         }
         
-        Spacer(modifier = Modifier.height(buttonHeight / 2))
-        
-        OutlinedButton(
-            onClick = { activity?.finish() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(buttonHeight),
-            border = BorderStroke(2.dp, lightGreen),
-            colors = ButtonDefaults.outlinedButtonColors(
-                containerColor = Color.Transparent,
-                contentColor = Color.White
-            )
-        ) {
-            Text("Exit", fontSize = 32.sp)
-        }
+        Spacer(modifier = Modifier.height(60.dp)) // Gap: 1/4 of main button size
         
         Text(
             text = timeFormatted,
-            fontSize = 48.sp,
+            fontSize = 56.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 32.dp),
             color = Color.White
         )
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Smaller Exit Button
+        OutlinedButton(
+            onClick = { activity?.finish() },
+            modifier = Modifier
+                .width(120.dp)
+                .height(50.dp),
+            border = BorderStroke(1.dp, lightGreen.copy(alpha = 0.7f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.Transparent,
+                contentColor = Color.White.copy(alpha = 0.7f)
+            )
+        ) {
+            Text("Exit", fontSize = 18.sp)
+        }
+    }
+}
+
+private fun playNotificationSound(context: Context) {
+    try {
+        val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val r = RingtoneManager.getRingtone(context, notification)
+        r.play()
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
 

@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TickClockApp"
+rootProject.name = "WorkoutClock"
 include(":app")
