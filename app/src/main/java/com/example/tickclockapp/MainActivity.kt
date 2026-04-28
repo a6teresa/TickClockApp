@@ -10,11 +10,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -34,16 +36,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -147,11 +156,14 @@ fun TickClockScreen() {
                     modifier = Modifier.size(mainButtonSize),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
+                    contentPadding = PaddingValues(0.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (isRunning1) darkGreen else Color.Transparent,
                         contentColor = Color.White
                     )
-                ) { }
+                ) {
+                    RealTimeClockOverlay()
+                }
 
                 Spacer(modifier = Modifier.height(60.dp))
 
@@ -170,11 +182,14 @@ fun TickClockScreen() {
                     modifier = Modifier.size(mainButtonSize),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
+                    contentPadding = PaddingValues(0.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (isRunning2) darkGreen else Color.Transparent,
                         contentColor = Color.White
                     )
-                ) { }
+                ) {
+                    RealTimeClockOverlay()
+                }
 
                 Spacer(modifier = Modifier.height(60.dp))
 
@@ -204,6 +219,67 @@ fun TickClockScreen() {
             ) {
                 Text("Exit", fontSize = 18.sp)
             }
+        }
+    }
+}
+
+@Composable
+fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
+    val timeMillis by produceState(initialValue = System.currentTimeMillis()) {
+        while (true) {
+            withFrameMillis {
+                value = System.currentTimeMillis()
+            }
+        }
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val calendar = Calendar.getInstance().apply {
+            timeInMillis = timeMillis
+        }
+
+        val millis = calendar.get(Calendar.MILLISECOND)
+        val second = calendar.get(Calendar.SECOND) + millis / 1000f
+        val minute = calendar.get(Calendar.MINUTE) + second / 60f
+        val hour = (calendar.get(Calendar.HOUR) % 12) + minute / 60f
+
+        val secAngle = (calendar.get(Calendar.SECOND) * 6f) - 90f
+        val minAngle = (minute * 6f) - 90f
+        val hourAngle = (hour * 30f) - 90f
+
+        val center = center
+        val radius = size.minDimension / 2
+        val accentColor = Color(0xFF90EE90)
+
+        // 1. Hour Hand
+        rotate(hourAngle) {
+            drawLine(
+                color = accentColor.copy(alpha = 0.8f),
+                start = center,
+                end = Offset(center.x + (radius * 0.5f), center.y),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
+
+        // 2. Minute Hand
+        rotate(minAngle) {
+            drawLine(
+                color = accentColor.copy(alpha = 0.8f),
+                start = center,
+                end = Offset(center.x + (radius * 0.75f), center.y),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
+
+        // 3. Second Radar Spot (White)
+        rotate(secAngle) {
+            drawCircle(
+                color = Color.White,
+                radius = 4.dp.toPx(),
+                center = Offset(center.x + radius - 6.dp.toPx(), center.y)
+            )
         }
     }
 }
@@ -260,31 +336,46 @@ private fun generateTone(freqHz: Double, durationMs: Int) {
         generatedSnd[idx++] = ((valShort.toInt() and 0xff00) ushr 8).toByte()
     }
 
-    val audioTrack = AudioTrack.Builder()
-        .setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-        )
-        .setAudioFormat(
-            AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(sampleRate)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                .build()
-        )
-        .setBufferSizeInBytes(generatedSnd.size)
-        .setTransferMode(AudioTrack.MODE_STATIC)
-        .build()
+    val audioTrack = try {
+        AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(generatedSnd.size)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return
+    }
 
-    audioTrack.setVolume(AudioTrack.getMaxVolume())
-    audioTrack.write(generatedSnd, 0, generatedSnd.size)
-    audioTrack.play()
+    try {
+        audioTrack.setVolume(AudioTrack.getMaxVolume())
+        audioTrack.write(generatedSnd, 0, generatedSnd.size)
+        audioTrack.play()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
     
     Thread {
-        Thread.sleep(durationMs.toLong() + 200)
-        audioTrack.stop()
-        audioTrack.release()
+        try {
+            Thread.sleep(durationMs.toLong() + 200)
+            if (audioTrack.state != AudioTrack.STATE_UNINITIALIZED) {
+                audioTrack.stop()
+                audioTrack.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }.start()
 }
