@@ -12,7 +12,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +77,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TickClockScreen() {
     val context = LocalContext.current
@@ -149,13 +152,21 @@ fun TickClockScreen() {
         }
     }
 
-    // Logic for Screen 2 (no beeps, notification every 1 min)
+    // Logic for Screen 2 (no beeps, TTS every 1 min)
     LaunchedEffect(isRunning2) {
         if (isRunning2) {
             while (isRunning2) {
                 totalSeconds2++
                 if (totalSeconds2 > 0 && totalSeconds2 % 60 == 0) {
-                    playNotificationSound(context)
+                    val minutes = totalSeconds2 / 60
+                    val hours = minutes / 60
+                    val msg = if (hours > 0) {
+                        val remMins = minutes % 60
+                        if (remMins > 0) "$hours hours $remMins minutes" else "$hours hours"
+                    } else {
+                        "$minutes minutes"
+                    }
+                    tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, null)
                 }
                 delay(1000)
             }
@@ -184,17 +195,23 @@ fun TickClockScreen() {
             val mainButtonSize = 240.dp
 
             if (currentScreen == AppScreen.Screen1) {
-                // SCREEN 1 CONTENT
-                OutlinedButton(
-                    onClick = { isRunning1 = !isRunning1 },
-                    modifier = Modifier.size(mainButtonSize),
+                // SCREEN 1 CONTENT (Workout Clock)
+                Surface(
+                    modifier = Modifier
+                        .size(mainButtonSize)
+                        .combinedClickable(
+                            onClick = { isRunning1 = !isRunning1 },
+                            onLongClick = {
+                                isRunning1 = false
+                                totalSeconds1 = 0
+                                cycleSeconds1 = 0
+                                roundCount1 = 0
+                            }
+                        ),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (isRunning1) darkGreen else Color.Transparent,
-                        contentColor = Color.White
-                    )
+                    color = if (isRunning1) darkGreen else Color.Transparent,
+                    contentColor = Color.White
                 ) {
                     RealTimeClockOverlay()
                 }
@@ -210,17 +227,21 @@ fun TickClockScreen() {
                     color = Color.White
                 )
             } else {
-                // SCREEN 2 CONTENT
-                OutlinedButton(
-                    onClick = { isRunning2 = !isRunning2 },
-                    modifier = Modifier.size(mainButtonSize),
+                // SCREEN 2 CONTENT (Count Clock)
+                Surface(
+                    modifier = Modifier
+                        .size(mainButtonSize)
+                        .combinedClickable(
+                            onClick = { isRunning2 = !isRunning2 },
+                            onLongClick = {
+                                isRunning2 = false
+                                totalSeconds2 = 0
+                            }
+                        ),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (isRunning2) darkGreen else Color.Transparent,
-                        contentColor = Color.White
-                    )
+                    color = if (isRunning2) darkGreen else Color.Transparent,
+                    contentColor = Color.White
                 ) {
                     RealTimeClockOverlay()
                 }
@@ -259,27 +280,34 @@ fun TickClockScreen() {
 
 @Composable
 fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
-    val timeMillis by produceState(initialValue = System.currentTimeMillis()) {
+    val timeState = produceState(initialValue = System.currentTimeMillis()) {
         while (true) {
-            withFrameMillis {
-                value = System.currentTimeMillis()
-            }
+            value = System.currentTimeMillis()
+            delay(100) // 10 FPS (1/10s accuracy) is much more CPU efficient than 60 FPS
         }
     }
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        val calendar = Calendar.getInstance().apply {
-            timeInMillis = timeMillis
-        }
+        val time = timeState.value
+        val zone = java.util.TimeZone.getDefault()
+        val offset = zone.getOffset(time)
+        val localTime = time + offset
+        
+        val totalSeconds = localTime / 1000
+        val millis = localTime % 1000
+        val second = totalSeconds % 60
+        val minute = (totalSeconds / 60) % 60
+        val hour = (totalSeconds / 3600) % 12
 
-        val millis = calendar.get(Calendar.MILLISECOND)
-        val second = calendar.get(Calendar.SECOND) + millis / 1000f
-        val minute = calendar.get(Calendar.MINUTE) + second / 60f
-        val hour = (calendar.get(Calendar.HOUR) % 12) + minute / 60f
-
-        val secAngle = (calendar.get(Calendar.SECOND) * 6f) - 90f
-        val minAngle = (minute * 6f) - 90f
-        val hourAngle = (hour * 30f) - 90f
+        // Jumping second hand (radar dot)
+        val secAngle = (second * 6f) - 90f
+        
+        // Smooth minute and hour hands
+        val smoothMinute = minute + second / 60f
+        val smoothHour = hour + smoothMinute / 60f
+        
+        val minAngle = (smoothMinute * 6f) - 90f
+        val hourAngle = (smoothHour * 30f) - 90f
 
         val center = center
         val radius = size.minDimension / 2
