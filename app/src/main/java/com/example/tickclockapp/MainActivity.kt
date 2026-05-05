@@ -19,7 +19,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -42,11 +41,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.StrokeCap
@@ -55,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -68,7 +64,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
                 ) {
                     TickClockScreen()
                 }
@@ -87,7 +83,7 @@ fun TickClockScreen() {
     // TTS Setup
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(Unit) {
-        val ttsInstance = TextToSpeech(context) { status ->
+        val ttsInstance = TextToSpeech(context) { _ ->
             // Initialized
         }
         tts = ttsInstance
@@ -98,14 +94,18 @@ fun TickClockScreen() {
     }
 
     // Screen 1 States
-    var isRunning1 by remember { mutableStateOf(false) }
+    var isRunning1 by remember { mutableStateOf(value = false) }
     var totalSeconds1 by remember { mutableIntStateOf(0) }
     var cycleSeconds1 by remember { mutableIntStateOf(0) }
     var roundCount1 by remember { mutableIntStateOf(0) }
 
     // Screen 2 States
-    var isRunning2 by remember { mutableStateOf(false) }
+    var isRunning2 by remember { mutableStateOf(value = false) }
     var totalSeconds2 by remember { mutableIntStateOf(0) }
+
+    // Workout 1 Automation State
+    var isWorkout1Active by remember { mutableStateOf(value = false) }
+    var workout1Step by remember { mutableIntStateOf(0) } // 0: Idle, 1: Count(10m), 2: Workout(5m), 3: Workout(5m)
 
     // Keep screen on while the app is visible
     DisposableEffect(Unit) {
@@ -119,7 +119,7 @@ fun TickClockScreen() {
     LaunchedEffect(isRunning1) {
         if (isRunning1) {
             // Fresh start: Jump to the beginning of the Preparation Phase (sec 26-30)
-            if (totalSeconds1 == 0 && cycleSeconds1 == 0) {
+            if ((totalSeconds1 == 0) && (cycleSeconds1 == 0)) {
                 cycleSeconds1 = 25
             }
 
@@ -144,7 +144,28 @@ fun TickClockScreen() {
                     totalSeconds1++
                 }
                 
-                if (totalSeconds1 > 0 && (totalSeconds1 % 240 == 225)) {
+                // Automation transition check for Workout 1 (Workout Clock phase)
+                if ((isWorkout1Active) && ((workout1Step == 2) || (workout1Step == 3))) {
+                    if (totalSeconds1 >= 300) { // 5 minutes
+                        isRunning1 = false
+                        totalSeconds1 = 0
+                        cycleSeconds1 = 0
+                        roundCount1 = 0
+                        
+                        if (workout1Step == 2) {
+                            workout1Step = 3
+                            currentScreen = AppScreen.Screen1
+                            isRunning1 = true
+                        } else {
+                            workout1Step = 0
+                            isWorkout1Active = false
+                            tts?.speak("Workout complete", TextToSpeech.QUEUE_FLUSH, null, null)
+                        }
+                        break
+                    }
+                }
+
+                if ((totalSeconds1 > 0) && ((totalSeconds1 % 240) == 225)) {
                     playNotificationSound(context)
                 }
                 delay(1000)
@@ -157,7 +178,19 @@ fun TickClockScreen() {
         if (isRunning2) {
             while (isRunning2) {
                 totalSeconds2++
-                if (totalSeconds2 > 0 && totalSeconds2 % 60 == 0) {
+                
+                // Automation transition check for Workout 1 (Count Clock phase)
+                if ((isWorkout1Active) && (workout1Step == 1)) {
+                    if (totalSeconds2 >= 600) { // 10 minutes
+                        isRunning2 = false
+                        workout1Step = 2
+                        currentScreen = AppScreen.Screen1
+                        isRunning1 = true
+                        break
+                    }
+                }
+
+                if ((totalSeconds2 > 0) && ((totalSeconds2 % 60) == 0)) {
                     val minutes = totalSeconds2 / 60
                     val hours = minutes / 60
                     val msg = if (hours > 0) {
@@ -178,17 +211,17 @@ fun TickClockScreen() {
             .fillMaxSize()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
+                indication = null,
             ) {
                 currentScreen = if (currentScreen == AppScreen.Screen1) AppScreen.Screen2 else AppScreen.Screen1
-            }
+            },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
             verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val lightGreen = Color(0xFF90EE90)
             val darkGreen = Color(0xFF006400)
@@ -206,12 +239,12 @@ fun TickClockScreen() {
                                 totalSeconds1 = 0
                                 cycleSeconds1 = 0
                                 roundCount1 = 0
-                            }
+                            },
                         ),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
                     color = if (isRunning1) darkGreen else Color.Transparent,
-                    contentColor = Color.White
+                    contentColor = Color.White,
                 ) {
                     RealTimeClockOverlay()
                 }
@@ -236,12 +269,12 @@ fun TickClockScreen() {
                             onLongClick = {
                                 isRunning2 = false
                                 totalSeconds2 = 0
-                            }
+                            },
                         ),
                     shape = CircleShape,
                     border = BorderStroke(3.dp, lightGreen),
                     color = if (isRunning2) darkGreen else Color.Transparent,
-                    contentColor = Color.White
+                    contentColor = Color.White,
                 ) {
                     RealTimeClockOverlay()
                 }
@@ -260,6 +293,44 @@ fun TickClockScreen() {
             }
 
             Spacer(modifier = Modifier.height(40.dp))
+
+            // Workout 1 Automation Button
+            val softRed = Color(0xFF8B0000)
+            OutlinedButton(
+                onClick = {
+                    if (isWorkout1Active) {
+                        // Toggle pause
+                        if (workout1Step == 1) {
+                            isRunning2 = !isRunning2
+                        } else if ((workout1Step == 2) || (workout1Step == 3)) {
+                            isRunning1 = !isRunning1
+                        }
+                    } else {
+                        // Start Workout 1 sequence
+                        tts?.speak("Workout 1 begins now", TextToSpeech.QUEUE_FLUSH, null, null)
+                        isWorkout1Active = true
+                        workout1Step = 1
+                        totalSeconds1 = 0
+                        cycleSeconds1 = 0
+                        roundCount1 = 0
+                        totalSeconds2 = 0
+                        currentScreen = AppScreen.Screen2
+                        isRunning2 = true
+                    }
+                },
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(60.dp),
+                border = BorderStroke(1.dp, if (isWorkout1Active) softRed else lightGreen.copy(alpha = 0.7f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (isWorkout1Active) softRed.copy(alpha = 0.2f) else Color.Transparent,
+                    contentColor = if (isWorkout1Active) Color.White else Color.White.copy(alpha = 0.7f)
+                )
+            ) {
+                Text("Workout 1", fontSize = 20.sp)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedButton(
                 onClick = { activity?.finish() },
@@ -294,17 +365,16 @@ fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
         val localTime = time + offset
         
         val totalSeconds = localTime / 1000
-        val millis = localTime % 1000
         val second = totalSeconds % 60
         val minute = (totalSeconds / 60) % 60
         val hour = (totalSeconds / 3600) % 12
 
-        // Jumping second hand (radar dot)
+        // Use jumping second hand (radar dot)
         val secAngle = (second * 6f) - 90f
         
         // Smooth minute and hour hands
-        val smoothMinute = minute + second / 60f
-        val smoothHour = hour + smoothMinute / 60f
+        val smoothMinute = minute + (second / 60f)
+        val smoothHour = hour + (smoothMinute / 60f)
         
         val minAngle = (smoothMinute * 6f) - 90f
         val hourAngle = (smoothHour * 30f) - 90f
@@ -320,7 +390,7 @@ fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
                 start = center,
                 end = Offset(center.x + (radius * 0.5f), center.y),
                 strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
+                cap = StrokeCap.Round,
             )
         }
 
@@ -331,7 +401,7 @@ fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
                 start = center,
                 end = Offset(center.x + (radius * 0.75f), center.y),
                 strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
+                cap = StrokeCap.Round,
             )
         }
 
@@ -340,7 +410,7 @@ fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
             drawCircle(
                 color = Color.White,
                 radius = 4.dp.toPx(),
-                center = Offset(center.x + radius - 6.dp.toPx(), center.y)
+                center = Offset(center.x + (radius - 6.dp.toPx()), center.y)
             )
         }
     }
@@ -375,20 +445,20 @@ private fun playToneForSecond(cycleSecond: Int) {
 
 private fun generateTone(freqHz: Double, durationMs: Int) {
     val sampleRate = 44100
-    val numSamples = (durationMs * sampleRate / 1000)
+    val numSamples = (durationMs * sampleRate) / 1000
     val sample = DoubleArray(numSamples)
     val generatedSnd = ByteArray(2 * numSamples)
     val fadeDurationMs = 50
-    val fadeSamples = (fadeDurationMs * sampleRate / 1000)
+    val fadeSamples = (fadeDurationMs * sampleRate) / 1000
 
     for (i in 0 until numSamples) {
         var amplitude = 1.0
         if (i < fadeSamples) {
             amplitude = i.toDouble() / fadeSamples
-        } else if (i > numSamples - fadeSamples) {
+        } else if (i > (numSamples - fadeSamples)) {
             amplitude = (numSamples - i).toDouble() / fadeSamples
         }
-        sample[i] = amplitude * sin(2.0 * PI * i.toDouble() / (sampleRate.toDouble() / freqHz))
+        sample[i] = amplitude * sin((2.0 * PI * i.toDouble()) / (sampleRate.toDouble() / freqHz))
     }
 
     var idx = 0
