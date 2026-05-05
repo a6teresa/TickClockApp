@@ -1,3 +1,4 @@
+# MainActivity.kt
 package com.example.tickclockapp
 
 import android.content.Context
