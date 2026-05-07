@@ -20,12 +20,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -49,6 +54,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -57,17 +63,34 @@ import kotlin.math.sin
 
 enum class AppScreen { Screen1, Screen2 }
 
+data class WorkoutStep(val screen: AppScreen, val duration: Int)
+data class WorkoutRoutine(val name: String, val steps: List<WorkoutStep>)
+
+val routines = listOf(
+    WorkoutRoutine(
+        "Workout 10-5-5",
+        listOf(
+            WorkoutStep(AppScreen.Screen2, 600), // 10m
+            WorkoutStep(AppScreen.Screen1, 300), // 5m
+            WorkoutStep(AppScreen.Screen1, 300)  // 5m
+        )
+    ),
+    WorkoutRoutine(
+        "Workout 8-4-4",
+        listOf(
+            WorkoutStep(AppScreen.Screen2, 480), // 8m
+            WorkoutStep(AppScreen.Screen1, 240), // 4m
+            WorkoutStep(AppScreen.Screen1, 240)  // 4m
+        )
+    )
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    TickClockScreen()
-                }
+                TickClockScreen()
             }
         }
     }
@@ -83,9 +106,7 @@ fun TickClockScreen() {
     // TTS Setup
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(Unit) {
-        val ttsInstance = TextToSpeech(context) { _ ->
-            // Initialized
-        }
+        val ttsInstance = TextToSpeech(context) { _ -> }
         tts = ttsInstance
         onDispose {
             ttsInstance.stop()
@@ -103,9 +124,10 @@ fun TickClockScreen() {
     var isRunning2 by remember { mutableStateOf(value = false) }
     var totalSeconds2 by remember { mutableIntStateOf(0) }
 
-    // Workout 1 Automation State
-    var isWorkout1Active by remember { mutableStateOf(value = false) }
-    var workout1Step by remember { mutableIntStateOf(0) } // 0: Idle, 1: Count(10m), 2: Workout(5m), 3: Workout(5m)
+    // Workout Automation State
+    var activeRoutineIndex by remember { mutableIntStateOf(-1) }
+    var workoutStepIndex by remember { mutableIntStateOf(0) }
+    val isWorkoutActive = activeRoutineIndex != -1
 
     // Keep screen on while the app is visible
     DisposableEffect(Unit) {
@@ -118,56 +140,38 @@ fun TickClockScreen() {
     // Logic for Screen 1 (with 30s audio cycle)
     LaunchedEffect(isRunning1) {
         if (isRunning1) {
-            // Fresh start: Jump to the beginning of the Preparation Phase (sec 26-30)
             if ((totalSeconds1 == 0) && (cycleSeconds1 == 0)) {
                 cycleSeconds1 = 25
             }
-
             while (isRunning1) {
                 cycleSeconds1++
                 if (cycleSeconds1 > 30) cycleSeconds1 = 1
-                
-                // At the start of a cycle, increment round
-                if (cycleSeconds1 == 1) {
-                    roundCount1++
-                }
-
+                if (cycleSeconds1 == 1) roundCount1++
                 playToneForSecond(cycleSeconds1)
-                
-                // Voice call at 16th second
                 if (cycleSeconds1 == 16) {
                     tts?.speak(roundCount1.toString(), TextToSpeech.QUEUE_FLUSH, null, null)
                 }
+                if (roundCount1 > 0) totalSeconds1++
 
-                // Only increment cumulative workout time once a round has actually started
-                if (roundCount1 > 0) {
-                    totalSeconds1++
-                }
-                
-                // Automation transition check for Workout 1 (Workout Clock phase)
-                if ((isWorkout1Active) && ((workout1Step == 2) || (workout1Step == 3))) {
-                    if (totalSeconds1 >= 300) { // 5 minutes
+                // Automation transition check
+                if (isWorkoutActive && (routines[activeRoutineIndex].steps[workoutStepIndex].screen == AppScreen.Screen1)) {
+                    if (totalSeconds1 >= routines[activeRoutineIndex].steps[workoutStepIndex].duration) {
                         isRunning1 = false
                         totalSeconds1 = 0
                         cycleSeconds1 = 0
                         roundCount1 = 0
-                        
-                        if (workout1Step == 2) {
-                            workout1Step = 3
-                            currentScreen = AppScreen.Screen1
-                            isRunning1 = true
+                        if (workoutStepIndex < routines[activeRoutineIndex].steps.size - 1) {
+                            workoutStepIndex++
+                            currentScreen = routines[activeRoutineIndex].steps[workoutStepIndex].screen
+                            if (currentScreen == AppScreen.Screen1) isRunning1 = true else isRunning2 = true
                         } else {
-                            workout1Step = 0
-                            isWorkout1Active = false
+                            activeRoutineIndex = -1
                             tts?.speak("Workout complete", TextToSpeech.QUEUE_FLUSH, null, null)
                         }
                         break
                     }
                 }
-
-                if ((totalSeconds1 > 0) && ((totalSeconds1 % 240) == 225)) {
-                    playNotificationSound(context)
-                }
+                if ((totalSeconds1 > 0) && ((totalSeconds1 % 240) == 225)) playNotificationSound(context)
                 delay(1000)
             }
         }
@@ -178,27 +182,23 @@ fun TickClockScreen() {
         if (isRunning2) {
             while (isRunning2) {
                 totalSeconds2++
-                
-                // Automation transition check for Workout 1 (Count Clock phase)
-                if ((isWorkout1Active) && (workout1Step == 1)) {
-                    if (totalSeconds2 >= 600) { // 10 minutes
+                // Automation transition check
+                if (isWorkoutActive && routines[activeRoutineIndex].steps[workoutStepIndex].screen == AppScreen.Screen2) {
+                    if (totalSeconds2 >= routines[activeRoutineIndex].steps[workoutStepIndex].duration) {
                         isRunning2 = false
-                        workout1Step = 2
-                        currentScreen = AppScreen.Screen1
-                        isRunning1 = true
+                        workoutStepIndex++
+                        currentScreen = routines[activeRoutineIndex].steps[workoutStepIndex].screen
+                        if (currentScreen == AppScreen.Screen1) isRunning1 = true else isRunning2 = true
                         break
                     }
                 }
-
                 if ((totalSeconds2 > 0) && ((totalSeconds2 % 60) == 0)) {
                     val minutes = totalSeconds2 / 60
                     val hours = minutes / 60
                     val msg = if (hours > 0) {
                         val remMins = minutes % 60
                         if (remMins > 0) "$hours hours $remMins minutes" else "$hours hours"
-                    } else {
-                        "$minutes minutes"
-                    }
+                    } else "$minutes minutes"
                     tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, null)
                 }
                 delay(1000)
@@ -206,33 +206,27 @@ fun TickClockScreen() {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Box(
+            modifier = Modifier.fillMaxSize().clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) {
                 currentScreen = if (currentScreen == AppScreen.Screen1) AppScreen.Screen2 else AppScreen.Screen1
-            },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
+            }
         ) {
-            val lightGreen = Color(0xFF90EE90)
-            val darkGreen = Color(0xFF006400)
-            val mainButtonSize = 240.dp
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val lightGreen = Color(0xFF90EE90)
+                val darkGreen = Color(0xFF006400)
+                val mainButtonSize = 240.dp
 
-            if (currentScreen == AppScreen.Screen1) {
-                // SCREEN 1 CONTENT (Workout Clock)
-                Surface(
-                    modifier = Modifier
-                        .size(mainButtonSize)
-                        .combinedClickable(
+                if (currentScreen == AppScreen.Screen1) {
+                    Surface(
+                        modifier = Modifier.size(mainButtonSize).combinedClickable(
                             onClick = { isRunning1 = !isRunning1 },
                             onLongClick = {
                                 isRunning1 = false
@@ -241,109 +235,97 @@ fun TickClockScreen() {
                                 roundCount1 = 0
                             },
                         ),
-                    shape = CircleShape,
-                    border = BorderStroke(3.dp, lightGreen),
-                    color = if (isRunning1) darkGreen else Color.Transparent,
-                    contentColor = Color.White,
-                ) {
-                    RealTimeClockOverlay()
-                }
-
-                Spacer(modifier = Modifier.height(60.dp))
-
-                val minutes = totalSeconds1 / 60
-                val remainingSeconds = totalSeconds1 % 60
-                Text(
-                    text = "%02d:%02d".format(minutes, remainingSeconds),
-                    fontSize = 56.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            } else {
-                // SCREEN 2 CONTENT (Count Clock)
-                Surface(
-                    modifier = Modifier
-                        .size(mainButtonSize)
-                        .combinedClickable(
+                        shape = CircleShape,
+                        border = BorderStroke(3.dp, lightGreen),
+                        color = if (isRunning1) darkGreen else Color.Transparent,
+                        contentColor = Color.White,
+                    ) {
+                        RealTimeClockOverlay()
+                    }
+                    Spacer(modifier = Modifier.height(60.dp))
+                    Text(
+                        text = "%02d:%02d".format(totalSeconds1 / 60, totalSeconds1 % 60),
+                        fontSize = 56.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.size(mainButtonSize).combinedClickable(
                             onClick = { isRunning2 = !isRunning2 },
                             onLongClick = {
                                 isRunning2 = false
                                 totalSeconds2 = 0
                             },
                         ),
-                    shape = CircleShape,
-                    border = BorderStroke(3.dp, lightGreen),
-                    color = if (isRunning2) darkGreen else Color.Transparent,
-                    contentColor = Color.White,
-                ) {
-                    RealTimeClockOverlay()
+                        shape = CircleShape,
+                        border = BorderStroke(3.dp, lightGreen),
+                        color = if (isRunning2) darkGreen else Color.Transparent,
+                        contentColor = Color.White,
+                    ) {
+                        RealTimeClockOverlay()
+                    }
+                    Spacer(modifier = Modifier.height(60.dp))
+                    val hours = totalSeconds2 / 3600
+                    val minutes = (totalSeconds2 % 3600) / 60
+                    val seconds = totalSeconds2 % 60
+                    Text(
+                        text = "%02d:%02d:%02d".format(hours, minutes, seconds),
+                        fontSize = 56.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(60.dp))
+                Spacer(modifier = Modifier.height(40.dp))
 
-                val hours = totalSeconds2 / 3600
-                val minutes = (totalSeconds2 % 3600) / 60
-                val seconds = totalSeconds2 % 60
-                Text(
-                    text = "%02d:%02d:%02d".format(hours, minutes, seconds),
-                    fontSize = 56.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-
-            Spacer(modifier = Modifier.height(40.dp))
-
-            // Workout 1 Automation Button
-            val softRed = Color(0xFF8B0000)
-            OutlinedButton(
-                onClick = {
-                    if (isWorkout1Active) {
-                        // Toggle pause
-                        if (workout1Step == 1) {
-                            isRunning2 = !isRunning2
-                        } else if ((workout1Step == 2) || (workout1Step == 3)) {
-                            isRunning1 = !isRunning1
+                val softRed = Color(0xFF8B0000)
+                val pagerState = rememberPagerState { routines.size }
+                Box(modifier = Modifier.fillMaxWidth().height(80.dp)) {
+                    HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { index ->
+                        val routine = routines[index]
+                        val isThisRoutineActive = activeRoutineIndex == index
+                        Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (isThisRoutineActive) {
+                                        if (routines[activeRoutineIndex].steps[workoutStepIndex].screen == AppScreen.Screen2) {
+                                            isRunning2 = !isRunning2
+                                        } else isRunning1 = !isRunning1
+                                    } else if (!isWorkoutActive) {
+                                        tts?.speak("${routine.name} begins now", TextToSpeech.QUEUE_FLUSH, null, null)
+                                        activeRoutineIndex = index
+                                        workoutStepIndex = 0
+                                        totalSeconds1 = 0
+                                        cycleSeconds1 = 0
+                                        roundCount1 = 0
+                                        totalSeconds2 = 0
+                                        currentScreen = routine.steps[0].screen
+                                        if (currentScreen == AppScreen.Screen1) isRunning1 = true else isRunning2 = true
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(2.dp, if (isThisRoutineActive) softRed else lightGreen.copy(alpha = 0.7f)),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isThisRoutineActive) softRed.copy(alpha = 0.2f) else Color.Transparent,
+                                    contentColor = if (isThisRoutineActive) Color.White else Color.White.copy(alpha = 0.7f),
+                                ),
+                            ) {
+                                Text(text = routine.name, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            }
                         }
-                    } else {
-                        // Start Workout 1 sequence
-                        tts?.speak("Workout 1 begins now", TextToSpeech.QUEUE_FLUSH, null, null)
-                        isWorkout1Active = true
-                        workout1Step = 1
-                        totalSeconds1 = 0
-                        cycleSeconds1 = 0
-                        roundCount1 = 0
-                        totalSeconds2 = 0
-                        currentScreen = AppScreen.Screen2
-                        isRunning2 = true
                     }
-                },
-                modifier = Modifier
-                    .width(160.dp)
-                    .height(60.dp),
-                border = BorderStroke(1.dp, if (isWorkout1Active) softRed else lightGreen.copy(alpha = 0.7f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (isWorkout1Active) softRed.copy(alpha = 0.2f) else Color.Transparent,
-                    contentColor = if (isWorkout1Active) Color.White else Color.White.copy(alpha = 0.7f)
-                )
-            ) {
-                Text("Workout 1", fontSize = 20.sp)
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedButton(
-                onClick = { activity?.finish() },
-                modifier = Modifier
-                    .width(120.dp)
-                    .height(50.dp),
-                border = BorderStroke(1.dp, lightGreen.copy(alpha = 0.7f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White.copy(alpha = 0.7f)
-                )
-            ) {
-                Text("Exit", fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.height(80.dp)) // Increased spacing to move Exit lower
+                OutlinedButton(
+                    onClick = { activity?.finish() },
+                    modifier = Modifier.width(120.dp).height(50.dp),
+                    border = BorderStroke(1.dp, lightGreen.copy(alpha = 0.7f)),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.Transparent, contentColor = Color.White.copy(alpha = 0.7f))
+                ) {
+                    Text("Exit", fontSize = 18.sp)
+                }
             }
         }
     }
@@ -354,64 +336,31 @@ fun RealTimeClockOverlay(modifier: Modifier = Modifier) {
     val timeState = produceState(initialValue = System.currentTimeMillis()) {
         while (true) {
             value = System.currentTimeMillis()
-            delay(100) // 10 FPS (1/10s accuracy) is much more CPU efficient than 60 FPS
+            delay(100)
         }
     }
-
     Canvas(modifier = modifier.fillMaxSize()) {
         val time = timeState.value
         val zone = java.util.TimeZone.getDefault()
-        val offset = zone.getOffset(time)
-        val localTime = time + offset
-        
+        val localTime = time + zone.getOffset(time)
         val totalSeconds = localTime / 1000
         val second = totalSeconds % 60
         val minute = (totalSeconds / 60) % 60
         val hour = (totalSeconds / 3600) % 12
-
-        // Use jumping second hand (radar dot)
-        val secAngle = (second * 6f) - 90f
-        
-        // Smooth minute and hour hands
         val smoothMinute = minute + (second / 60f)
         val smoothHour = hour + (smoothMinute / 60f)
-        
-        val minAngle = (smoothMinute * 6f) - 90f
-        val hourAngle = (smoothHour * 30f) - 90f
-
         val center = center
         val radius = size.minDimension / 2
         val accentColor = Color(0xFF90EE90)
 
-        // 1. Hour Hand
-        rotate(hourAngle) {
-            drawLine(
-                color = accentColor.copy(alpha = 0.8f),
-                start = center,
-                end = Offset(center.x + (radius * 0.5f), center.y),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
+        rotate((smoothHour * 30f) - 90f) {
+            drawLine(color = accentColor.copy(alpha = 0.8f), start = center, end = Offset(center.x + (radius * 0.5f), center.y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         }
-
-        // 2. Minute Hand
-        rotate(minAngle) {
-            drawLine(
-                color = accentColor.copy(alpha = 0.8f),
-                start = center,
-                end = Offset(center.x + (radius * 0.75f), center.y),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
+        rotate((smoothMinute * 6f) - 90f) {
+            drawLine(color = accentColor.copy(alpha = 0.8f), start = center, end = Offset(center.x + (radius * 0.75f), center.y), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         }
-
-        // 3. Second Radar Spot (White)
-        rotate(secAngle) {
-            drawCircle(
-                color = Color.White,
-                radius = 4.dp.toPx(),
-                center = Offset(center.x + (radius - 6.dp.toPx()), center.y)
-            )
+        rotate((second * 6f) - 90f) {
+            drawCircle(color = Color.White, radius = 4.dp.toPx(), center = Offset(center.x + (radius - 6.dp.toPx()), center.y))
         }
     }
 }
@@ -427,62 +376,45 @@ private fun playNotificationSound(context: Context) {
 }
 
 private fun playToneForSecond(cycleSecond: Int) {
-    val freq392 = 392.0 // G4
-    val freq440 = 440.0 // A4
-    val freq523 = 523.0 // C5
-    val freq659 = 659.0 // E5
-    
+    val freq392 = 392.0
+    val freq440 = 440.0
+    val freq523 = 523.0
+    val freq659 = 659.0
     when (cycleSecond) {
         in 1..13 -> generateTone(freq392, 100)
         14 -> generateTone(freq440, 1800)
         15 -> { }
         in 16..25 -> { }
-        in 26..28 -> generateTone(freq523, 100)
+        26 -> generateTone(freq523, 100, volume = 0.25f)
+        in 27..28 -> generateTone(freq523, 100)
         29 -> generateTone(freq659, 1800)
         30 -> { }
     }
 }
 
-private fun generateTone(freqHz: Double, durationMs: Int) {
+private fun generateTone(freqHz: Double, durationMs: Int, volume: Float = 1.0f) {
     val sampleRate = 44100
     val numSamples = (durationMs * sampleRate) / 1000
     val sample = DoubleArray(numSamples)
     val generatedSnd = ByteArray(2 * numSamples)
     val fadeDurationMs = 50
     val fadeSamples = (fadeDurationMs * sampleRate) / 1000
-
     for (i in 0 until numSamples) {
         var amplitude = 1.0
-        if (i < fadeSamples) {
-            amplitude = i.toDouble() / fadeSamples
-        } else if (i > (numSamples - fadeSamples)) {
-            amplitude = (numSamples - i).toDouble() / fadeSamples
-        }
+        if (i < fadeSamples) amplitude = i.toDouble() / fadeSamples
+        else if (i > (numSamples - fadeSamples)) amplitude = (numSamples - i).toDouble() / fadeSamples
         sample[i] = amplitude * sin((2.0 * PI * i.toDouble()) / (sampleRate.toDouble() / freqHz))
     }
-
     var idx = 0
     for (dVal in sample) {
         val valShort = (dVal * 32767).toInt().toShort()
         generatedSnd[idx++] = (valShort.toInt() and 0x00ff).toByte()
         generatedSnd[idx++] = ((valShort.toInt() and 0xff00) ushr 8).toByte()
     }
-
     val audioTrack = try {
         AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(generatedSnd.size)
             .setTransferMode(AudioTrack.MODE_STATIC)
             .build()
@@ -490,15 +422,13 @@ private fun generateTone(freqHz: Double, durationMs: Int) {
         e.printStackTrace()
         return
     }
-
     try {
-        audioTrack.setVolume(AudioTrack.getMaxVolume())
+        audioTrack.setVolume(AudioTrack.getMaxVolume() * volume)
         audioTrack.write(generatedSnd, 0, generatedSnd.size)
         audioTrack.play()
     } catch (e: Exception) {
         e.printStackTrace()
     }
-    
     Thread {
         try {
             Thread.sleep(durationMs.toLong() + 200)
